@@ -13,6 +13,7 @@ from __future__ import annotations
 from datetime import date, datetime
 
 import streamlit as st
+from pypdf import PdfReader  # YENİ EKLENEN PDF KÜTÜPHANESİ
 
 from modules.config_loader import load_config, get_active_ai_settings, get_active_search_settings
 from modules.data_scanner import DataScanner
@@ -110,7 +111,7 @@ log_manager = get_log_manager()
 
 
 # ======================================================================
-# 3) NAVİGASYON
+# 3) NAVİGASYON VE BİLGİ KAYNAĞI YÜKLEME (Sidebar)
 # ======================================================================
 st.title(f"{CONFIG['app']['icon']} {CONFIG['app']['title']}")
 
@@ -119,6 +120,36 @@ page = st.sidebar.radio("Menü", PAGES, label_visibility="collapsed")
 
 crop_folders = scanner.scan()
 crop_names = [c.name for c in crop_folders]
+
+# --- YENİ EKLENEN PDF BİLGİ KAYNAĞI YÜKLEME (SIDEBAR) ---
+st.sidebar.divider()
+st.sidebar.header("📚 Bilgi Kaynağı")
+st.sidebar.caption("Tarım rehberleri vb. PDF belgelerinizi buraya yükleyip AI asistanınıza okutun.")
+pdf_file = st.sidebar.file_uploader("PDF Yükle", type=["pdf"])
+
+if pdf_file:
+    with st.sidebar.status("PDF okunuyor...", expanded=True) as status:
+        try:
+            reader = PdfReader(pdf_file)
+            text = ""
+            for page_num in range(len(reader.pages)):
+                page_text = reader.pages[page_num].extract_text()
+                if page_text:
+                    text += page_text + "\n"
+            
+            # AI'ın hatırlaması için metni session_state (geçici hafıza) içine alıyoruz
+            st.session_state.pdf_icerik = text
+            st.session_state.pdf_name = pdf_file.name
+            status.update(label=f"{pdf_file.name} başarıyla hafızaya alındı!", state="complete", expanded=False)
+        except Exception as e:
+            status.update(label="PDF okuma hatası!", state="error", expanded=False)
+            st.sidebar.error(str(e))
+else:
+    # Eğer kullanıcı dosyanın yanındaki Çarpı (X) tuşuna basıp dosyayı silerse, hafızayı temizle
+    if "pdf_icerik" in st.session_state:
+        del st.session_state["pdf_icerik"]
+    if "pdf_name" in st.session_state:
+        del st.session_state["pdf_name"]
 
 
 # ======================================================================
@@ -216,7 +247,7 @@ elif page == "📸 Medya Yükleme":
 
 
 # ======================================================================
-# SAYFA: AI SOHBET (Hibrit RAG + Web)
+# SAYFA: AI SOHBET (Hibrit RAG + Web + Yüklenen PDF)
 # ======================================================================
 elif page == "💬 AI Sohbet":
     ai_settings = get_active_ai_settings(CONFIG)
@@ -240,7 +271,7 @@ elif page == "💬 AI Sohbet":
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    user_query = st.chat_input("Sorunuzu yazın (örn: 'Domateste yaprak sararması neden olur?')")
+    user_query = st.chat_input("Sorunuzu yazın (örn: 'Zeytinlerde hümik asit nasıl uygulanır?')")
 
     if user_query:
         st.session_state.chat_history.append({"role": "user", "content": user_query})
@@ -249,10 +280,7 @@ elif page == "💬 AI Sohbet":
 
         with st.chat_message("assistant"):
             if chat_image is not None:
-                # Görsel analiz modu: RAG/web araması yapılmaz. Bu, daha önce
-                # tespit edilen bir hatayı düzeltir — eskiden burada da arka
-                # planda metin tabanlı web araması çalışıp, görselle hiçbir
-                # ilgisi olmayan sonuçlar "kaynak" diye gösteriliyordu.
+                # Görsel analiz modu: RAG/web araması yapılmaz. 
                 with st.spinner("Görsel analiz ediliyor..."):
                     response = ai_engine.analyze_image(
                         image_bytes=chat_image.getvalue(),
@@ -264,24 +292,34 @@ elif page == "💬 AI Sohbet":
                     st.caption("📷 Bu yanıt yalnızca yüklediğiniz görsele dayanılarak üretildi "
                                "(yerel doküman/web kaynağı kullanılmadı).")
             else:
-                with st.spinner("Yerel dokümanlar taranıyor..."):
+                with st.spinner("Bilgi kaynakları taranıyor..."):
                     rag_results = rag_engine.search(user_query)
 
                 local_context = ""
                 sources = []
+                
+                # 1. Proje içindeki sabit dokümanlar (Varsa)
                 if rag_results:
                     local_context = "\n---\n".join(r.chunk.text for r in rag_results)
                     sources = sorted({f"{r.chunk.source_file} (s.{r.chunk.page})" for r in rag_results})
 
+                # 2. YENİ EKLENEN: Kullanıcının yan menüden yüklediği PDF'in içeriği
+                if "pdf_icerik" in st.session_state and "pdf_name" in st.session_state:
+                    ek_pdf_metni = f"\n\n--- KULLANICI TARAFINDAN YÜKLENEN BELGE: {st.session_state.pdf_name} ---\n{st.session_state.pdf_icerik}"
+                    local_context += ek_pdf_metni
+                    sources.append(f"📄 Yüklenen Belge: {st.session_state.pdf_name}")
+
+                # 3. Web Araması (Eğer yerel/yüklenen bilgi yoksa)
                 web_context = ""
                 web_sources = []
-                if not rag_results and search_client.is_configured():
+                if not rag_results and "pdf_icerik" not in st.session_state and search_client.is_configured():
                     with st.spinner("Yerel veri bulunamadı, web'de aranıyor..."):
                         web_results = search_client.search(user_query)
                     if web_results:
                         web_context = "\n---\n".join(f"{r.title}: {r.snippet}" for r in web_results)
                         web_sources = [r.url for r in web_results if r.url]
 
+                # AI'a soru ve tüm toplanan bağlamı (context) gönderiyoruz
                 response = ai_engine.generate(
                     user_query=user_query,
                     local_context=local_context,
@@ -291,13 +329,14 @@ elif page == "💬 AI Sohbet":
 
                 st.markdown(response.text)
 
+                # Kaynakları kullanıcıya göster
                 if sources:
-                    st.caption("📄 Yerel kaynak: " + ", ".join(sources))
+                    st.caption("📄 Referans Alınan Kaynak: " + ", ".join(sources))
                 elif web_sources:
                     st.caption("🌐 Web kaynağı: " + ", ".join(web_sources[:3]))
                 elif not response.is_error:
-                    st.caption("ℹ️ Bu yanıt için ne yerel doküman ne de web kaynağı bulunamadı; "
-                               "model genel bilgisiyle yanıtlamış olabilir, doğrulamanızı öneririz.")
+                    st.caption("ℹ️ Bu yanıt için ekstra bir doküman/web kaynağı kullanılmadı. "
+                               "Modelin kendi bilgi tabanı kullanıldı.")
 
         st.session_state.chat_history.append({"role": "assistant", "content": response.text})
 
@@ -356,7 +395,7 @@ elif page == "⚙️ Ayarlar":
         st.write(f"{len(sources)} dosya indekslendi:")
         st.write(sources)
     else:
-        st.info("`project_knowledge/` klasörüne henüz PDF eklenmemiş.")
+        st.info("`project_knowledge/` klasörüne henüz sabit PDF eklenmemiş.")
     if st.button("🔄 Bilgi tabanını yeniden indeksle"):
         get_rag_engine.clear()
         st.rerun()
