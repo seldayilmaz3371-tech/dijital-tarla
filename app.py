@@ -7,6 +7,8 @@ Dijital Tarla Günlüğü - Ana Uygulama Girişi
 from __future__ import annotations
 from datetime import date, datetime
 import streamlit as st
+from PIL import Image  # YENİ: Fotoğrafları yapay zekaya hazırlamak için eklendi
+
 from modules.config_loader import load_config, get_active_ai_settings, get_active_search_settings
 from modules.data_scanner import DataScanner
 from modules.rag_engine import RagEngine
@@ -129,21 +131,57 @@ elif page == "📸 Medya Yükleme":
 
 elif page == "💬 AI Sohbet":
     st.subheader("Tarım Asistanı")
-    if "chat_history" not in st.session_state: st.session_state.chat_history = []
-    for msg in st.session_state.chat_history:
-        with st.chat_message(msg["role"]): st.markdown(msg["content"])
     
+    # YENİ: Fotoğraf Yükleme Alanı
+    with st.expander("📸 Fotoğraf Analizi (İsteğe Bağlı)", expanded=False):
+        uploaded_ai_image = st.file_uploader(
+            "Teşhis veya analiz için bir fotoğraf yükleyin (İsteğe bağlı):", 
+            type=['png', 'jpg', 'jpeg'],
+            key="ai_chat_uploader"
+        )
+        if uploaded_ai_image is not None:
+            st.image(uploaded_ai_image, caption="Yüklendi ve analize hazır", use_container_width=True)
+
+    if "chat_history" not in st.session_state: st.session_state.chat_history = []
+    
+    # Geçmiş mesajları ekrana basma
+    for msg in st.session_state.chat_history:
+        # Fotoğrafları sohbet geçmişinde tekrar basmıyoruz (sadece metinler)
+        if msg["role"] in ["user", "assistant"]: 
+            with st.chat_message(msg["role"]): st.markdown(msg["content"])
+    
+    # Kullanıcı soru sorduğunda
     if user_query := st.chat_input("Sorunuzu yazın..."):
         st.session_state.chat_history.append({"role": "user", "content": user_query})
         with st.chat_message("user"): st.markdown(user_query)
         
         with st.chat_message("assistant"):
-            with st.spinner("Bilgi kaynakları taranıyor..."):
+            with st.spinner("Bilgi kaynakları taranıyor ve analiz ediliyor..."):
                 rag_results = rag_engine.search(user_query)
                 local_context = "\n---\n".join(r.chunk.text for r in rag_results) if rag_results else ""
-                response = ai_engine.generate(user_query=user_query, local_context=local_context, history=st.session_state.chat_history[:-1])
-                st.markdown(response.text)
-        st.session_state.chat_history.append({"role": "assistant", "content": response.text})
+                
+                # YENİ: Fotoğraf yüklendiyse formatını hazırlıyoruz
+                image_obj = None
+                if uploaded_ai_image is not None:
+                    image_obj = Image.open(uploaded_ai_image)
+                
+                # YENİ: Yoğunluk Hatalarını Yakalayan Güvenlik Bloğu
+                try:
+                    response = ai_engine.generate(
+                        user_query=user_query, 
+                        local_context=local_context, 
+                        history=st.session_state.chat_history[:-1],
+                        image=image_obj  # Fotoğrafı ai_engine'e gönderiyoruz
+                    )
+                    st.markdown(response.text)
+                    st.session_state.chat_history.append({"role": "assistant", "content": response.text})
+                except Exception as e:
+                    # Rate Limit (429) veya Quota hatalarını Türkçe ve kullanıcı dostu yapıyoruz
+                    error_msg = str(e).lower()
+                    if "429" in error_msg or "quota" in error_msg or "exhausted" in error_msg:
+                        st.warning("⏳ Yapay zeka servisi şu anda yoğun talep görüyor. Lütfen 10-15 saniye bekleyip sorunuzu tekrar gönderin.")
+                    else:
+                        st.error(f"Sistemsel bir hata oluştu: {e}")
 
 elif page == "📋 Aktivite Günlüğü":
     df = log_manager.load()
