@@ -1,0 +1,20 @@
+streamlit>=1.38.0
+pandas>=2.2.0
+
+# AI Sağlayıcılar (Direct SDK)
+# NOT: Google'ın YENİ resmi kütüphanesi kullanılıyor (google-genai).
+# Eski "google-generativeai" kütüphanesi üretici tarafından kullanımdan
+# kaldırıldığı için bilerek tercih edilmedi.
+google-genai>=1.0.0
+openai>=1.40.0
+
+# Web Arama Sağlayıcıları
+tavily-python>=0.5.0
+google-search-results>=2.4.2
+
+# Yerel RAG (PDF okuma + TF-IDF retrieval)
+pypdf>=4.2.0
+scikit-learn>=1.5.0
+
+# Görsel işleme
+Pillow>=10.4.0

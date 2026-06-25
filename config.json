@@ -1,0 +1,48 @@
+{
+  "app": {
+    "title": "Dijital Tarla Günlüğü",
+    "icon": "🌾",
+    "language": "tr"
+  },
+  "ai": {
+    "active_provider": "gemini",
+    "providers": {
+      "gemini": {
+        "model": "gemini-2.5-flash",
+        "secret_key_name": "GEMINI_API_KEY"
+      },
+      "openai": {
+        "model": "gpt-4o",
+        "secret_key_name": "OPENAI_API_KEY"
+      }
+    }
+  },
+  "search": {
+    "active_provider": "tavily",
+    "providers": {
+      "tavily": {
+        "secret_key_name": "TAVILY_API_KEY"
+      },
+      "serpapi": {
+        "secret_key_name": "SERPAPI_API_KEY"
+      }
+    },
+    "max_results": 5
+  },
+  "rag": {
+    "knowledge_dir": "project_knowledge",
+    "chunk_size": 800,
+    "chunk_overlap": 150,
+    "top_k": 4,
+    "relevance_threshold": 0.12
+  },
+  "data": {
+    "root_dir": "data",
+    "log_file": "logs/activity_log.csv",
+    "media_filename_pattern": "{date}_{id}_{tur}{ext}",
+    "allowed_media_extensions": [".jpg", ".jpeg", ".png", ".heic", ".mp4", ".mov"]
+  },
+  "log_schema": {
+    "columns": ["tarih", "parsel_tur", "kayit_id", "islem_tipi", "aciklama", "miktar", "birim", "kullanici_notu", "medya_dosyasi"]
+  }
+}
