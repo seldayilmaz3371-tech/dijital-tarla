@@ -5,6 +5,8 @@ Dijital Tarla Günlüğü - Ana Uygulama Girişi
 """
 
 from __future__ import annotations
+import os
+import io
 from datetime import date, datetime
 import streamlit as st
 from PIL import Image
@@ -132,9 +134,81 @@ elif page == "📸 Medya Yükleme":
 elif page == "💬 AI Sohbet":
     st.subheader("Tarım Asistanı")
     
-    with st.expander("📸 Fotoğraf Analizi (İsteğe Bağlı)", expanded=False):
+    # --- YENİ EKLENEN: OTOMATİK PARSEL ANALİZİ MODÜLÜ ---
+    with st.expander("📈 Otomatik Parsel Gelişim Analizi", expanded=False):
+        st.info("Bu modül, seçtiğiniz parseldeki eski ve yeni kayıtları karşılaştırarak size gelişim raporu sunar.")
+        df_logs = log_manager.load()
+        # Sadece medya dosyası olan kayıtları filtrele
+        df_media = df_logs[df_logs["medya_dosyasi"].notna() & (df_logs["medya_dosyasi"] != "")]
+        
+        if not df_media.empty:
+            parsel_listesi = df_media["parsel_tur"].unique()
+            secilen_analiz_parseli = st.selectbox("Analiz Edilecek Parsel:", parsel_listesi)
+            
+            if st.button("🔍 Gelişimi Karşılaştır ve Raporla"):
+                parsel_kayitlari = df_media[df_media["parsel_tur"] == secilen_analiz_parseli].sort_values(by="tarih")
+                
+                if len(parsel_kayitlari) < 2:
+                    st.warning("⚠️ Karşılaştırma yapabilmek için bu parselde farklı zamanlarda yüklenmiş en az 2 fotoğraf olmalıdır.")
+                else:
+                    ilk_kayit = parsel_kayitlari.iloc[0]
+                    son_kayit = parsel_kayitlari.iloc[-1]
+                    
+                    ilk_foto_yolu = os.path.join(CONFIG["data"]["root_dir"], secilen_analiz_parseli, str(ilk_kayit["medya_dosyasi"]))
+                    son_foto_yolu = os.path.join(CONFIG["data"]["root_dir"], secilen_analiz_parseli, str(son_kayit["medya_dosyasi"]))
+                    
+                    if os.path.exists(ilk_foto_yolu) and os.path.exists(son_foto_yolu):
+                        with st.spinner("Geçmiş arşiv taranıyor ve analiz ediliyor. Lütfen bekleyin..."):
+                            try:
+                                # İki fotoğrafı yan yana birleştiriyoruz
+                                img1 = Image.open(ilk_foto_yolu)
+                                img2 = Image.open(son_foto_yolu)
+                                
+                                hedef_genislik = 800
+                                oran1 = hedef_genislik / float(img1.size[0])
+                                img1 = img1.resize((hedef_genislik, int(float(img1.size[1]) * float(oran1))))
+                                
+                                oran2 = hedef_genislik / float(img2.size[0])
+                                img2 = img2.resize((hedef_genislik, int(float(img2.size[1]) * float(oran2))))
+                                
+                                birlesik_img = Image.new('RGB', (img1.width + img2.width, max(img1.height, img2.height)))
+                                birlesik_img.paste(img1, (0, 0))
+                                birlesik_img.paste(img2, (img1.width, 0))
+                                
+                                img_byte_arr = io.BytesIO()
+                                birlesik_img.save(img_byte_arr, format='JPEG')
+                                image_bytes = img_byte_arr.getvalue()
+                                
+                                # Sistem Promtu
+                                analiz_sorusu = (
+                                    f"Sen bir Tarım Müfettişisin. Görselde sol tarafta {ilk_kayit['tarih']} tarihli, "
+                                    f"sağ tarafta ise {son_kayit['tarih']} tarihli {secilen_analiz_parseli} parseline ait iki fotoğraf yan yana. "
+                                    f"Bu iki dönemi kıyaslayarak sadece 3 başlıkta kısa rapor ver:\n"
+                                    f"1) Gelişim Seyri (Büyüme/kötüleşme var mı?)\n"
+                                    f"2) Sağlık Durumu (Hastalık/zararlı izi belirdi mi?)\n"
+                                    f"3) Müdahale Önerisi (Gübre/su tavsiyesi)."
+                                )
+                                
+                                response = ai_engine.analyze_image(image_bytes=image_bytes, mime_type="image/jpeg", question=analiz_sorusu)
+                                st.success("Analiz Tamamlandı!")
+                                st.image(birlesik_img, caption=f"Sol: {ilk_kayit['tarih']} | Sağ: {son_kayit['tarih']}")
+                                st.markdown("### 📊 Otomatik Gelişim Raporu")
+                                st.markdown(response.text)
+                                
+                                if "chat_history" not in st.session_state: st.session_state.chat_history = []
+                                st.session_state.chat_history.append({"role": "assistant", "content": f"**{secilen_analiz_parseli} Karşılaştırma Raporu:**\n\n{response.text}"})
+                                
+                            except Exception as e:
+                                st.error(f"Görsel işleme veya AI analizi sırasında hata oluştu: {e}")
+                    else:
+                        st.error("Dosyalar sistemde bulunamadı. Lütfen Medya Yükleme geçmişinizi kontrol edin.")
+        else:
+            st.info("Sistemde karşılaştırma yapılacak görsel kayıt bulunamadı.")
+    # -----------------------------------------------------------
+    
+    with st.expander("📸 Fotoğraf Analizi (Manuel Yükleme)", expanded=False):
         uploaded_ai_image = st.file_uploader(
-            "Teşhis veya analiz için bir fotoğraf yükleyin (İsteğe bağlı):", 
+            "Anlık analiz için bir fotoğraf yükleyin (İsteğe bağlı):", 
             type=['png', 'jpg', 'jpeg'],
             key="ai_chat_uploader"
         )
@@ -158,12 +232,10 @@ elif page == "💬 AI Sohbet":
                 
                 try:
                     if uploaded_ai_image is not None:
-                        # GÖRSEL MOTORU: Fotoğraf varsa RAG/Web araması yapılmadan doğrudan görsel analize gider
                         image_bytes = uploaded_ai_image.getvalue()
                         mime_type = uploaded_ai_image.type
                         response = ai_engine.analyze_image(image_bytes=image_bytes, mime_type=mime_type, question=user_query)
                     else:
-                        # METİN MOTORU: Fotoğraf yoksa normal sohbet/PDF okuma modunda çalışır
                         response = ai_engine.generate(
                             user_query=user_query, 
                             local_context=local_context, 
@@ -175,7 +247,7 @@ elif page == "💬 AI Sohbet":
                 except Exception as e:
                     error_msg = str(e).lower()
                     if "429" in error_msg or "quota" in error_msg or "exhausted" in error_msg:
-                        st.warning("⏳ Yapay zeka servisi şu anda yoğun talep görüyor. Lütfen 10-15 saniye bekleyip sorunuzu tekrar gönderin.")
+                        st.warning("⏳ Yapay zeka servisi şu anda yoğun talep görüyor. Lütfen 10-15 saniye bekleyip tekrar deneyin.")
                     else:
                         st.error(f"Sistemsel bir hata oluştu: {e}")
 
