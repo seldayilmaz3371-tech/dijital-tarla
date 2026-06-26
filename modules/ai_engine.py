@@ -16,10 +16,6 @@ Gemini/OpenAI sunucuları geçici olarak meşgul olduğunda (503),
 kota aşıldığında (429) veya ağ sorunu olduğunda artık uygulama
 çökmüyor; kullanıcıya anlaşılır bir mesaj gösteriliyor.
 
-GÜNCELLEME 3 (2026-06): Görsel analiz için ayrı sistem promptu
-(SYSTEM_PROMPT_VISION_TR) eklendi — RAG/web kaynak çerçevesi
-görsel modda artık kullanılmıyor.
-
 "Sıfır Varsayım" ilkesi burada da geçerlidir: bu sınıf tavsiye ÜRETMEZ,
 sadece app.py'den gelen, RAG/web kaynaklarıyla zenginleştirilmiş
 prompt'u ilgili LLM API'sine iletir ve yanıtı döner.
@@ -50,9 +46,16 @@ bitki/tarla fotoğrafı ve bir soru veriliyor.
 2) Fotoğraf net değilse, çok uzaktan/karanlık çekilmişse veya teşhis için yeterli
    detay içermiyorsa tahmin yürütme; tam olarak şunu söyle:
    "Bunu kesin olarak teşhis edemem, daha net bir veri veya yakın çekim gerekiyor."
-3) Emin olmadığın hiçbir şey söylemeden, sadece gözlemlediğin somut belirtileri
-   (yaprak rengi, leke, solma, doku, böcek izi vb.) açıkla.
-4) "YEREL KAYNAK" veya "WEB KAYNAĞI" kavramlarından hiç bahsetme; bu yanıt
+3) ANCAK görsel kanıt çok karakteristik/tanıdık bir zararlı, hastalık veya belirtiye
+   işaret ediyorsa (örn. yaygın bilinen bir görünüm), bunu KESİN bir teşhis gibi
+   sunmadan "olası" diye belirterek paylaş. Örnek ifade: "Bu görüntü [X]'e çok
+   benziyor, ancak kesin teşhis ve müdahale kararı için yerel bir ziraat
+   mühendisine/uzmana danışmanızı öneririm."
+4) Asla ilaç/pestisit dozu, marka adı veya uygulama talimatı verme; bu konuda her
+   zaman yerel ziraat mühendisine veya ürün etiketine yönlendir.
+5) Emin olmadığın hiçbir şey kesin gibi söylemeden, gözlemlediğin somut belirtileri
+   (yaprak rengi, leke, solma, doku, böcek/iz, salgı vb.) açıkla.
+6) "YEREL KAYNAK" veya "WEB KAYNAĞI" kavramlarından hiç bahsetme; bu yanıt
    tamamen ve doğrudan görsele dayanır."""
 
 
@@ -117,7 +120,9 @@ class AIEngine:
     # HATA YÖNETİMİ
     # ------------------------------------------------------------------
     def _friendly_error_message(self, exc: Exception) -> str:
-        """Ham API istisnasını kullanıcının anlayabileceği bir mesaja çevirir."""
+        """Ham API istisnasını kullanıcının anlayabileceği bir mesaja çevirir.
+        Teknik traceback'i ekrana göstermek yerine, sebebe göre yönlendirici
+        bir açıklama sunar."""
         msg = str(exc)
 
         if "503" in msg or "UNAVAILABLE" in msg or "overloaded" in msg.lower():
@@ -141,6 +146,7 @@ class AIEngine:
         if "timeout" in msg.lower() or "connection" in msg.lower():
             return "⚠️ İnternet bağlantısı veya sunucu zaman aşımı sorunu oluştu. Lütfen tekrar deneyin."
 
+        # Beklenmeyen/tanımlanamayan bir hata - kısa bir özet göster, kullanıcıyı bilgilendir.
         return f"⚠️ AI servisinden yanıt alınırken beklenmeyen bir hata oluştu: {msg[:200]}"
 
     # ------------------------------------------------------------------
@@ -183,7 +189,9 @@ class AIEngine:
     # GÖRSEL ANALİZ
     # ------------------------------------------------------------------
     def analyze_image(self, image_bytes: bytes, mime_type: str, question: str) -> AIResponse:
-        """Yüklenen bitki/hastalık fotoğrafını analiz eder."""
+        """Yüklenen bitki/hastalık fotoğrafını analiz eder. Net olmayan
+        görsellerde modelin "kesin teşhis edemem" demesi SYSTEM_PROMPT_TR
+        içinde zorunlu kılınmıştır."""
         if not self.is_configured():
             return AIResponse(
                 text="⚠️ API anahtarı bulunamadı.",
