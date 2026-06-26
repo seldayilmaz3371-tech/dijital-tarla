@@ -120,12 +120,30 @@ if page == "📊 Dashboard":
             st.bar_chart(summary.pivot(index="ay", columns="islem_tipi", values="adet").fillna(0))
 
 elif page == "📸 Medya Yükleme":
+    # Form başlamadan önce sistemdeki mevcut parselleri bir listede topluyoruz
+    parsel_secenekleri = ["➕ (Yeni Parsel Oluştur)"] + crop_names
+    
     with st.form("media_upload_form", clear_on_submit=True):
-        crop_choice = st.text_input("Ürün/Parsel adı")
+        st.info("Var olan bir parseli listeden seçebilir veya listeye yeni bir parsel ekleyebilirsiniz.")
+        
+        # Kullanıcıya açılır liste sunuyoruz
+        secilen_parsel = st.selectbox("📂 Kayıtlı Parseller", parsel_secenekleri)
+        
+        # Eğer kullanıcı "Yeni Parsel Oluştur" seçtiyse burayı dolduracak
+        yeni_parsel = st.text_input("📝 Yeni Parsel Adı (Sadece üstten 'Yeni Parsel Oluştur' seçiliyse doldurun)")
+        
         islem_tipi = st.selectbox("İşlem Tipi", ["gözlem", "gübreleme", "ilaçlama", "sulama", "hasat", "diğer"])
         uploaded_file = st.file_uploader("Medya dosyası", type=["jpg", "jpeg", "png", "mp4"])
+        
         if st.form_submit_button("Kaydet"):
-            if uploaded_file and crop_choice:
+            # Hangi parsel isminin kullanılacağını belirliyoruz
+            crop_choice = yeni_parsel.strip() if secilen_parsel == "➕ (Yeni Parsel Oluştur)" else secilen_parsel
+            
+            if not crop_choice:
+                st.error("⚠️ Lütfen bir parsel seçin veya yeni bir parsel adı yazın!")
+            elif not uploaded_file:
+                st.warning("⚠️ Lütfen yüklenecek bir medya dosyası seçin!")
+            else:
                 # 1. Klasörü oluştur ve dosyayı kaydet
                 scanner.ensure_crop_folder(crop_choice)
                 saved = media_manager.save(uploaded_file, crop_folder=crop_choice)
@@ -140,7 +158,7 @@ elif page == "📸 Medya Yükleme":
                 log_manager.append_entry(yeni_kayit)
                 
                 # 3. Başarı mesajı
-                st.success(f"✅ Dosya kaydedildi ve Aktivite Günlüğü'ne başarıyla işlendi!")
+                st.success(f"✅ Dosya '{crop_choice}' parseline kaydedildi ve Aktivite Günlüğü'ne başarıyla işlendi!")
 
 elif page == "💬 AI Sohbet":
     st.subheader("Tarım Asistanı")
@@ -150,7 +168,6 @@ elif page == "💬 AI Sohbet":
         st.info("Bu modül, seçtiğiniz parseldeki eski ve yeni kayıtları karşılaştırarak size gelişim raporu sunar.")
         df_logs = log_manager.load()
         
-        # DataFrame boş değilse ve medya_dosyasi sütunu varsa filtrele
         if not df_logs.empty and "medya_dosyasi" in df_logs.columns:
             df_media = df_logs[df_logs["medya_dosyasi"].notna() & (df_logs["medya_dosyasi"] != "")]
             
