@@ -126,84 +126,97 @@ elif page == "📸 Medya Yükleme":
         uploaded_file = st.file_uploader("Medya dosyası", type=["jpg", "jpeg", "png", "mp4"])
         if st.form_submit_button("Kaydet"):
             if uploaded_file and crop_choice:
+                # 1. Klasörü oluştur ve dosyayı kaydet
                 scanner.ensure_crop_folder(crop_choice)
                 saved = media_manager.save(uploaded_file, crop_folder=crop_choice)
-                log_manager.append_entry({"tarih": str(date.today()), "parsel_tur": crop_choice, "islem_tipi": islem_tipi, "medya_dosyasi": saved.filename})
-                st.success("Kaydedildi!")
+                
+                # 2. Log (Günlük) kaydını oluştur ve dosyaya yazdır
+                yeni_kayit = {
+                    "tarih": str(date.today()), 
+                    "parsel_tur": crop_choice, 
+                    "islem_tipi": islem_tipi, 
+                    "medya_dosyasi": saved.filename
+                }
+                log_manager.append_entry(yeni_kayit)
+                
+                # 3. Başarı mesajı
+                st.success(f"✅ Dosya kaydedildi ve Aktivite Günlüğü'ne başarıyla işlendi!")
 
 elif page == "💬 AI Sohbet":
     st.subheader("Tarım Asistanı")
     
-    # --- YENİ EKLENEN: OTOMATİK PARSEL ANALİZİ MODÜLÜ ---
+    # --- OTOMATİK PARSEL ANALİZİ MODÜLÜ ---
     with st.expander("📈 Otomatik Parsel Gelişim Analizi", expanded=False):
         st.info("Bu modül, seçtiğiniz parseldeki eski ve yeni kayıtları karşılaştırarak size gelişim raporu sunar.")
         df_logs = log_manager.load()
-        # Sadece medya dosyası olan kayıtları filtrele
-        df_media = df_logs[df_logs["medya_dosyasi"].notna() & (df_logs["medya_dosyasi"] != "")]
         
-        if not df_media.empty:
-            parsel_listesi = df_media["parsel_tur"].unique()
-            secilen_analiz_parseli = st.selectbox("Analiz Edilecek Parsel:", parsel_listesi)
+        # DataFrame boş değilse ve medya_dosyasi sütunu varsa filtrele
+        if not df_logs.empty and "medya_dosyasi" in df_logs.columns:
+            df_media = df_logs[df_logs["medya_dosyasi"].notna() & (df_logs["medya_dosyasi"] != "")]
             
-            if st.button("🔍 Gelişimi Karşılaştır ve Raporla"):
-                parsel_kayitlari = df_media[df_media["parsel_tur"] == secilen_analiz_parseli].sort_values(by="tarih")
+            if not df_media.empty:
+                parsel_listesi = df_media["parsel_tur"].unique()
+                secilen_analiz_parseli = st.selectbox("Analiz Edilecek Parsel:", parsel_listesi)
                 
-                if len(parsel_kayitlari) < 2:
-                    st.warning("⚠️ Karşılaştırma yapabilmek için bu parselde farklı zamanlarda yüklenmiş en az 2 fotoğraf olmalıdır.")
-                else:
-                    ilk_kayit = parsel_kayitlari.iloc[0]
-                    son_kayit = parsel_kayitlari.iloc[-1]
+                if st.button("🔍 Gelişimi Karşılaştır ve Raporla"):
+                    parsel_kayitlari = df_media[df_media["parsel_tur"] == secilen_analiz_parseli].sort_values(by="tarih")
                     
-                    ilk_foto_yolu = os.path.join(CONFIG["data"]["root_dir"], secilen_analiz_parseli, str(ilk_kayit["medya_dosyasi"]))
-                    son_foto_yolu = os.path.join(CONFIG["data"]["root_dir"], secilen_analiz_parseli, str(son_kayit["medya_dosyasi"]))
-                    
-                    if os.path.exists(ilk_foto_yolu) and os.path.exists(son_foto_yolu):
-                        with st.spinner("Geçmiş arşiv taranıyor ve analiz ediliyor. Lütfen bekleyin..."):
-                            try:
-                                # İki fotoğrafı yan yana birleştiriyoruz
-                                img1 = Image.open(ilk_foto_yolu)
-                                img2 = Image.open(son_foto_yolu)
-                                
-                                hedef_genislik = 800
-                                oran1 = hedef_genislik / float(img1.size[0])
-                                img1 = img1.resize((hedef_genislik, int(float(img1.size[1]) * float(oran1))))
-                                
-                                oran2 = hedef_genislik / float(img2.size[0])
-                                img2 = img2.resize((hedef_genislik, int(float(img2.size[1]) * float(oran2))))
-                                
-                                birlesik_img = Image.new('RGB', (img1.width + img2.width, max(img1.height, img2.height)))
-                                birlesik_img.paste(img1, (0, 0))
-                                birlesik_img.paste(img2, (img1.width, 0))
-                                
-                                img_byte_arr = io.BytesIO()
-                                birlesik_img.save(img_byte_arr, format='JPEG')
-                                image_bytes = img_byte_arr.getvalue()
-                                
-                                # Sistem Promtu
-                                analiz_sorusu = (
-                                    f"Sen bir Tarım Müfettişisin. Görselde sol tarafta {ilk_kayit['tarih']} tarihli, "
-                                    f"sağ tarafta ise {son_kayit['tarih']} tarihli {secilen_analiz_parseli} parseline ait iki fotoğraf yan yana. "
-                                    f"Bu iki dönemi kıyaslayarak sadece 3 başlıkta kısa rapor ver:\n"
-                                    f"1) Gelişim Seyri (Büyüme/kötüleşme var mı?)\n"
-                                    f"2) Sağlık Durumu (Hastalık/zararlı izi belirdi mi?)\n"
-                                    f"3) Müdahale Önerisi (Gübre/su tavsiyesi)."
-                                )
-                                
-                                response = ai_engine.analyze_image(image_bytes=image_bytes, mime_type="image/jpeg", question=analiz_sorusu)
-                                st.success("Analiz Tamamlandı!")
-                                st.image(birlesik_img, caption=f"Sol: {ilk_kayit['tarih']} | Sağ: {son_kayit['tarih']}")
-                                st.markdown("### 📊 Otomatik Gelişim Raporu")
-                                st.markdown(response.text)
-                                
-                                if "chat_history" not in st.session_state: st.session_state.chat_history = []
-                                st.session_state.chat_history.append({"role": "assistant", "content": f"**{secilen_analiz_parseli} Karşılaştırma Raporu:**\n\n{response.text}"})
-                                
-                            except Exception as e:
-                                st.error(f"Görsel işleme veya AI analizi sırasında hata oluştu: {e}")
+                    if len(parsel_kayitlari) < 2:
+                        st.warning("⚠️ Karşılaştırma yapabilmek için bu parselde farklı zamanlarda yüklenmiş en az 2 fotoğraf olmalıdır.")
                     else:
-                        st.error("Dosyalar sistemde bulunamadı. Lütfen Medya Yükleme geçmişinizi kontrol edin.")
+                        ilk_kayit = parsel_kayitlari.iloc[0]
+                        son_kayit = parsel_kayitlari.iloc[-1]
+                        
+                        ilk_foto_yolu = os.path.join(CONFIG["data"]["root_dir"], secilen_analiz_parseli, str(ilk_kayit["medya_dosyasi"]))
+                        son_foto_yolu = os.path.join(CONFIG["data"]["root_dir"], secilen_analiz_parseli, str(son_kayit["medya_dosyasi"]))
+                        
+                        if os.path.exists(ilk_foto_yolu) and os.path.exists(son_foto_yolu):
+                            with st.spinner("Geçmiş arşiv taranıyor ve analiz ediliyor. Lütfen bekleyin..."):
+                                try:
+                                    img1 = Image.open(ilk_foto_yolu)
+                                    img2 = Image.open(son_foto_yolu)
+                                    
+                                    hedef_genislik = 800
+                                    oran1 = hedef_genislik / float(img1.size[0])
+                                    img1 = img1.resize((hedef_genislik, int(float(img1.size[1]) * float(oran1))))
+                                    
+                                    oran2 = hedef_genislik / float(img2.size[0])
+                                    img2 = img2.resize((hedef_genislik, int(float(img2.size[1]) * float(oran2))))
+                                    
+                                    birlesik_img = Image.new('RGB', (img1.width + img2.width, max(img1.height, img2.height)))
+                                    birlesik_img.paste(img1, (0, 0))
+                                    birlesik_img.paste(img2, (img1.width, 0))
+                                    
+                                    img_byte_arr = io.BytesIO()
+                                    birlesik_img.save(img_byte_arr, format='JPEG')
+                                    image_bytes = img_byte_arr.getvalue()
+                                    
+                                    analiz_sorusu = (
+                                        f"Sen bir Tarım Müfettişisin. Görselde sol tarafta {ilk_kayit['tarih']} tarihli, "
+                                        f"sağ tarafta ise {son_kayit['tarih']} tarihli {secilen_analiz_parseli} parseline ait iki fotoğraf yan yana. "
+                                        f"Bu iki dönemi kıyaslayarak sadece 3 başlıkta kısa rapor ver:\n"
+                                        f"1) Gelişim Seyri (Büyüme/kötüleşme var mı?)\n"
+                                        f"2) Sağlık Durumu (Hastalık/zararlı izi belirdi mi?)\n"
+                                        f"3) Müdahale Önerisi (Gübre/su tavsiyesi)."
+                                    )
+                                    
+                                    response = ai_engine.analyze_image(image_bytes=image_bytes, mime_type="image/jpeg", question=analiz_sorusu)
+                                    st.success("Analiz Tamamlandı!")
+                                    st.image(birlesik_img, caption=f"Sol: {ilk_kayit['tarih']} | Sağ: {son_kayit['tarih']}")
+                                    st.markdown("### 📊 Otomatik Gelişim Raporu")
+                                    st.markdown(response.text)
+                                    
+                                    if "chat_history" not in st.session_state: st.session_state.chat_history = []
+                                    st.session_state.chat_history.append({"role": "assistant", "content": f"**{secilen_analiz_parseli} Karşılaştırma Raporu:**\n\n{response.text}"})
+                                    
+                                except Exception as e:
+                                    st.error(f"Görsel işleme veya AI analizi sırasında hata oluştu: {e}")
+                        else:
+                            st.error("Dosyalar sistemde bulunamadı. Lütfen Medya Yükleme geçmişinizi kontrol edin.")
+            else:
+                st.info("Sistemde karşılaştırma yapılacak görsel kayıt bulunamadı.")
         else:
-            st.info("Sistemde karşılaştırma yapılacak görsel kayıt bulunamadı.")
+            st.info("Günlükte henüz medya kaydı bulunmuyor.")
     # -----------------------------------------------------------
     
     with st.expander("📸 Fotoğraf Analizi (Manuel Yükleme)", expanded=False):
