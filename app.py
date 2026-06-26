@@ -7,7 +7,7 @@ Dijital Tarla Günlüğü - Ana Uygulama Girişi
 from __future__ import annotations
 from datetime import date, datetime
 import streamlit as st
-from PIL import Image  # YENİ: Fotoğrafları yapay zekaya hazırlamak için eklendi
+from PIL import Image
 
 from modules.config_loader import load_config, get_active_ai_settings, get_active_search_settings
 from modules.data_scanner import DataScanner
@@ -132,7 +132,6 @@ elif page == "📸 Medya Yükleme":
 elif page == "💬 AI Sohbet":
     st.subheader("Tarım Asistanı")
     
-    # YENİ: Fotoğraf Yükleme Alanı
     with st.expander("📸 Fotoğraf Analizi (İsteğe Bağlı)", expanded=False):
         uploaded_ai_image = st.file_uploader(
             "Teşhis veya analiz için bir fotoğraf yükleyin (İsteğe bağlı):", 
@@ -144,13 +143,10 @@ elif page == "💬 AI Sohbet":
 
     if "chat_history" not in st.session_state: st.session_state.chat_history = []
     
-    # Geçmiş mesajları ekrana basma
     for msg in st.session_state.chat_history:
-        # Fotoğrafları sohbet geçmişinde tekrar basmıyoruz (sadece metinler)
         if msg["role"] in ["user", "assistant"]: 
             with st.chat_message(msg["role"]): st.markdown(msg["content"])
     
-    # Kullanıcı soru sorduğunda
     if user_query := st.chat_input("Sorunuzu yazın..."):
         st.session_state.chat_history.append({"role": "user", "content": user_query})
         with st.chat_message("user"): st.markdown(user_query)
@@ -160,23 +156,23 @@ elif page == "💬 AI Sohbet":
                 rag_results = rag_engine.search(user_query)
                 local_context = "\n---\n".join(r.chunk.text for r in rag_results) if rag_results else ""
                 
-                # YENİ: Fotoğraf yüklendiyse formatını hazırlıyoruz
-                image_obj = None
-                if uploaded_ai_image is not None:
-                    image_obj = Image.open(uploaded_ai_image)
-                
-                # YENİ: Yoğunluk Hatalarını Yakalayan Güvenlik Bloğu
                 try:
-                    response = ai_engine.generate(
-                        user_query=user_query, 
-                        local_context=local_context, 
-                        history=st.session_state.chat_history[:-1],
-                        image=image_obj  # Fotoğrafı ai_engine'e gönderiyoruz
-                    )
+                    if uploaded_ai_image is not None:
+                        # GÖRSEL MOTORU: Fotoğraf varsa RAG/Web araması yapılmadan doğrudan görsel analize gider
+                        image_bytes = uploaded_ai_image.getvalue()
+                        mime_type = uploaded_ai_image.type
+                        response = ai_engine.analyze_image(image_bytes=image_bytes, mime_type=mime_type, question=user_query)
+                    else:
+                        # METİN MOTORU: Fotoğraf yoksa normal sohbet/PDF okuma modunda çalışır
+                        response = ai_engine.generate(
+                            user_query=user_query, 
+                            local_context=local_context, 
+                            history=st.session_state.chat_history[:-1]
+                        )
+                    
                     st.markdown(response.text)
                     st.session_state.chat_history.append({"role": "assistant", "content": response.text})
                 except Exception as e:
-                    # Rate Limit (429) veya Quota hatalarını Türkçe ve kullanıcı dostu yapıyoruz
                     error_msg = str(e).lower()
                     if "429" in error_msg or "quota" in error_msg or "exhausted" in error_msg:
                         st.warning("⏳ Yapay zeka servisi şu anda yoğun talep görüyor. Lütfen 10-15 saniye bekleyip sorunuzu tekrar gönderin.")
