@@ -46,4 +46,8 @@ def get_active_search_settings(config: dict) -> dict:
         "provider": provider,
         "api_key": get_secret(provider_cfg["secret_key_name"]),
         "max_results": search_cfg.get("max_results", 5),
+        # Boş bırakılırsa (örn. []) filtre uygulanmaz, eski (sınırsız) davranışa
+        # geri döner. config.json'a domain eklemek/çıkarmak kod değişikliği
+        # gerektirmez.
+        "trusted_domains": search_cfg.get("trusted_domains", []),
     }

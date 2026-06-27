@@ -27,7 +27,11 @@
         "secret_key_name": "SERPAPI_API_KEY"
       }
     },
-    "max_results": 5
+    "max_results": 5,
+    "trusted_domains": [
+      "tarimorman.gov.tr",
+      "fao.org"
+    ]
   },
   "rag": {
     "knowledge_dir": "project_knowledge",
