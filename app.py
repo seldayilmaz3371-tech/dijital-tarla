@@ -122,92 +122,99 @@ if page == "📊 Dashboard":
 elif page == "📸 Medya Yükleme":
     # Form başlamadan önce sistemdeki mevcut parselleri bir listede topluyoruz
     parsel_secenekleri = ["➕ (Yeni Parsel Oluştur)"] + crop_names
-    
+
     with st.form("media_upload_form", clear_on_submit=True):
         st.info("Var olan bir parseli listeden seçebilir veya listeye yeni bir parsel ekleyebilirsiniz.")
-        
+
         # Kullanıcıya açılır liste sunuyoruz
         secilen_parsel = st.selectbox("📂 Kayıtlı Parseller", parsel_secenekleri)
-        
+
         # Eğer kullanıcı "Yeni Parsel Oluştur" seçtiyse burayı dolduracak
         yeni_parsel = st.text_input("📝 Yeni Parsel Adı (Sadece üstten 'Yeni Parsel Oluştur' seçiliyse doldurun)")
-        
+
         islem_tipi = st.selectbox("İşlem Tipi", ["gözlem", "gübreleme", "ilaçlama", "sulama", "hasat", "diğer"])
         uploaded_file = st.file_uploader("Medya dosyası", type=["jpg", "jpeg", "png", "mp4"])
-        
+
         if st.form_submit_button("Kaydet"):
             # Hangi parsel isminin kullanılacağını belirliyoruz
             crop_choice = yeni_parsel.strip() if secilen_parsel == "➕ (Yeni Parsel Oluştur)" else secilen_parsel
-            
+
             if not crop_choice:
                 st.error("⚠️ Lütfen bir parsel seçin veya yeni bir parsel adı yazın!")
             elif not uploaded_file:
                 st.warning("⚠️ Lütfen yüklenecek bir medya dosyası seçin!")
             else:
+                # DÜZELTME: Parsel adını normalize ediyoruz (büyük/küçük harf,
+                # boşluk farkı yüzünden aynı parsel için iki farklı klasör
+                # oluşmasın diye). ensure_crop_folder zaten kendi içinde
+                # normalize ediyordu ama media_manager.save() eskiden
+                # normalize edilmemiş ismi kullanıyordu -> iki klasör riski.
+                crop_folder_name = crop_choice.strip().lower().replace(" ", "_")
+
                 # 1. Klasörü oluştur ve dosyayı kaydet
-                scanner.ensure_crop_folder(crop_choice)
-                saved = media_manager.save(uploaded_file, crop_folder=crop_choice)
-                
+                scanner.ensure_crop_folder(crop_folder_name)
+                saved = media_manager.save(uploaded_file, crop_folder=crop_folder_name)
+
                 # 2. Log (Günlük) kaydını oluştur ve dosyaya yazdır
                 yeni_kayit = {
-                    "tarih": str(date.today()), 
-                    "parsel_tur": crop_choice, 
-                    "islem_tipi": islem_tipi, 
+                    "tarih": str(date.today()),
+                    "parsel_tur": crop_folder_name,
+                    "islem_tipi": islem_tipi,
                     "medya_dosyasi": saved.filename
                 }
                 log_manager.append_entry(yeni_kayit)
-                
+
                 # 3. Başarı mesajı
-                st.success(f"✅ Dosya '{crop_choice}' parseline kaydedildi ve Aktivite Günlüğü'ne başarıyla işlendi!")
+                st.success(f"✅ Dosya '{crop_folder_name}' parseline kaydedildi ve Aktivite Günlüğü'ne başarıyla işlendi!")
 
 elif page == "💬 AI Sohbet":
     st.subheader("Tarım Asistanı")
-    
+
     # --- OTOMATİK PARSEL ANALİZİ MODÜLÜ ---
     with st.expander("📈 Otomatik Parsel Gelişim Analizi", expanded=False):
         st.info("Bu modül, seçtiğiniz parseldeki eski ve yeni kayıtları karşılaştırarak size gelişim raporu sunar.")
         df_logs = log_manager.load()
-        
+
         if not df_logs.empty and "medya_dosyasi" in df_logs.columns:
             df_media = df_logs[df_logs["medya_dosyasi"].notna() & (df_logs["medya_dosyasi"] != "")]
-            
+
             if not df_media.empty:
                 parsel_listesi = df_media["parsel_tur"].unique()
                 secilen_analiz_parseli = st.selectbox("Analiz Edilecek Parsel:", parsel_listesi)
-                
+
                 if st.button("🔍 Gelişimi Karşılaştır ve Raporla"):
                     parsel_kayitlari = df_media[df_media["parsel_tur"] == secilen_analiz_parseli].sort_values(by="tarih")
-                    
+
                     if len(parsel_kayitlari) < 2:
                         st.warning("⚠️ Karşılaştırma yapabilmek için bu parselde farklı zamanlarda yüklenmiş en az 2 fotoğraf olmalıdır.")
                     else:
                         ilk_kayit = parsel_kayitlari.iloc[0]
                         son_kayit = parsel_kayitlari.iloc[-1]
-                        
+
                         ilk_foto_yolu = os.path.join(CONFIG["data"]["root_dir"], secilen_analiz_parseli, str(ilk_kayit["medya_dosyasi"]))
                         son_foto_yolu = os.path.join(CONFIG["data"]["root_dir"], secilen_analiz_parseli, str(son_kayit["medya_dosyasi"]))
-                        
+
                         if os.path.exists(ilk_foto_yolu) and os.path.exists(son_foto_yolu):
                             with st.spinner("Geçmiş arşiv taranıyor ve analiz ediliyor. Lütfen bekleyin..."):
                                 try:
                                     img1 = Image.open(ilk_foto_yolu)
                                     img2 = Image.open(son_foto_yolu)
-                                    
+
                                     hedef_genislik = 800
                                     oran1 = hedef_genislik / float(img1.size[0])
                                     img1 = img1.resize((hedef_genislik, int(float(img1.size[1]) * float(oran1))))
-                                    
+
                                     oran2 = hedef_genislik / float(img2.size[0])
                                     img2 = img2.resize((hedef_genislik, int(float(img2.size[1]) * float(oran2))))
-                                    
+
                                     birlesik_img = Image.new('RGB', (img1.width + img2.width, max(img1.height, img2.height)))
                                     birlesik_img.paste(img1, (0, 0))
                                     birlesik_img.paste(img2, (img1.width, 0))
-                                    
+
                                     img_byte_arr = io.BytesIO()
                                     birlesik_img.save(img_byte_arr, format='JPEG')
                                     image_bytes = img_byte_arr.getvalue()
-                                    
+
                                     analiz_sorusu = (
                                         f"Sen bir Tarım Müfettişisin. Görselde sol tarafta {ilk_kayit['tarih']} tarihli, "
                                         f"sağ tarafta ise {son_kayit['tarih']} tarihli {secilen_analiz_parseli} parseline ait iki fotoğraf yan yana. "
@@ -216,16 +223,23 @@ elif page == "💬 AI Sohbet":
                                         f"2) Sağlık Durumu (Hastalık/zararlı izi belirdi mi?)\n"
                                         f"3) Müdahale Önerisi (Gübre/su tavsiyesi)."
                                     )
-                                    
+
                                     response = ai_engine.analyze_image(image_bytes=image_bytes, mime_type="image/jpeg", question=analiz_sorusu)
-                                    st.success("Analiz Tamamlandı!")
-                                    st.image(birlesik_img, caption=f"Sol: {ilk_kayit['tarih']} | Sağ: {son_kayit['tarih']}")
-                                    st.markdown("### 📊 Otomatik Gelişim Raporu")
-                                    st.markdown(response.text)
-                                    
-                                    if "chat_history" not in st.session_state: st.session_state.chat_history = []
-                                    st.session_state.chat_history.append({"role": "assistant", "content": f"**{secilen_analiz_parseli} Karşılaştırma Raporu:**\n\n{response.text}"})
-                                    
+
+                                    # DÜZELTME: response.is_error kontrolü eklendi.
+                                    # AI hata mesajı döndürdüyse (örn. API anahtarı
+                                    # yok / yoğun talep) bunu "başarı" gibi GÖSTERME.
+                                    if getattr(response, "is_error", False):
+                                        st.error(response.text)
+                                    else:
+                                        st.success("Analiz Tamamlandı!")
+                                        st.image(birlesik_img, caption=f"Sol: {ilk_kayit['tarih']} | Sağ: {son_kayit['tarih']}")
+                                        st.markdown("### 📊 Otomatik Gelişim Raporu")
+                                        st.markdown(response.text)
+
+                                        if "chat_history" not in st.session_state: st.session_state.chat_history = []
+                                        st.session_state.chat_history.append({"role": "assistant", "content": f"**{secilen_analiz_parseli} Karşılaştırma Raporu:**\n\n{response.text}"})
+
                                 except Exception as e:
                                     st.error(f"Görsel işleme veya AI analizi sırasında hata oluştu: {e}")
                         else:
@@ -235,10 +249,10 @@ elif page == "💬 AI Sohbet":
         else:
             st.info("Günlükte henüz medya kaydı bulunmuyor.")
     # -----------------------------------------------------------
-    
+
     with st.expander("📸 Fotoğraf Analizi (Manuel Yükleme)", expanded=False):
         uploaded_ai_image = st.file_uploader(
-            "Anlık analiz için bir fotoğraf yükleyin (İsteğe bağlı):", 
+            "Anlık analiz için bir fotoğraf yükleyin (İsteğe bağlı):",
             type=['png', 'jpg', 'jpeg'],
             key="ai_chat_uploader"
         )
@@ -246,20 +260,49 @@ elif page == "💬 AI Sohbet":
             st.image(uploaded_ai_image, caption="Yüklendi ve analize hazır", use_container_width=True)
 
     if "chat_history" not in st.session_state: st.session_state.chat_history = []
-    
+
     for msg in st.session_state.chat_history:
-        if msg["role"] in ["user", "assistant"]: 
+        if msg["role"] in ["user", "assistant"]:
             with st.chat_message(msg["role"]): st.markdown(msg["content"])
-    
+
     if user_query := st.chat_input("Sorunuzu yazın..."):
         st.session_state.chat_history.append({"role": "user", "content": user_query})
         with st.chat_message("user"): st.markdown(user_query)
-        
+
         with st.chat_message("assistant"):
             with st.spinner("Bilgi kaynakları taranıyor ve analiz ediliyor..."):
                 rag_results = rag_engine.search(user_query)
-                local_context = "\n---\n".join(r.chunk.text for r in rag_results) if rag_results else ""
-                
+                local_context_parts = []
+                if rag_results:
+                    local_context_parts.append("\n---\n".join(r.chunk.text for r in rag_results))
+
+                # ANA DÜZELTME: Meta-sorular ("hangi PDF'lere erişebiliyorsun"
+                # gibi) içerik bazlı RAG aramasıyla hiç eşleşmez (TF-IDF skoru
+                # sıfır çıkar). Bu yüzden dosya listesini İÇERİK eşleşmesinden
+                # bağımsız olarak HER ZAMAN bağlama ekliyoruz.
+                indexed_sources = rag_engine.list_indexed_sources()
+                if indexed_sources:
+                    local_context_parts.append(
+                        "NOT: Sistemde şu PDF dosyaları indekslenmiş ve erişilebilir "
+                        "durumda (yukarıdaki içerik eşleşmesi olmasa bile bu "
+                        "dosyaların varlığı bilinir): " + ", ".join(indexed_sources)
+                    )
+                local_context = "\n\n".join(local_context_parts)
+
+                # DÜZELTME (Bulgu #1): Web arama fallback'i artık gerçekten
+                # çalışıyor. Önceki sürümde search_client tanımlanıyordu ama
+                # hiç çağrılmıyordu — hibrit RAG+Web mimarisi sessizce devre
+                # dışı kalmıştı. Yerelde İÇERİK eşleşmesi yoksa (rag_results
+                # boşsa) ve arama API anahtarı tanımlıysa, güncel bilgi için
+                # web'de arama yapılır.
+                web_context = ""
+                web_sources = []
+                if not rag_results and search_client.is_configured():
+                    web_results = search_client.search(user_query)
+                    if web_results:
+                        web_context = "\n---\n".join(f"{r.title}: {r.snippet}" for r in web_results)
+                        web_sources = [r.url for r in web_results if r.url]
+
                 try:
                     if uploaded_ai_image is not None:
                         image_bytes = uploaded_ai_image.getvalue()
@@ -267,12 +310,23 @@ elif page == "💬 AI Sohbet":
                         response = ai_engine.analyze_image(image_bytes=image_bytes, mime_type=mime_type, question=user_query)
                     else:
                         response = ai_engine.generate(
-                            user_query=user_query, 
-                            local_context=local_context, 
+                            user_query=user_query,
+                            local_context=local_context,
+                            web_context=web_context,
                             history=st.session_state.chat_history[:-1]
                         )
-                    
+
                     st.markdown(response.text)
+
+                    # Kaynaklılık ilkesi: yanıtın hangi kaynağa dayandığını
+                    # kullanıcıya göster (proje başında belirlenen kural).
+                    if uploaded_ai_image is None and not getattr(response, "is_error", False):
+                        if rag_results:
+                            kaynaklar = sorted({f"{r.chunk.source_file} (s.{r.chunk.page})" for r in rag_results})
+                            st.caption("📄 Yerel kaynak: " + ", ".join(kaynaklar))
+                        elif web_sources:
+                            st.caption("🌐 Web kaynağı: " + ", ".join(web_sources[:3]))
+
                     st.session_state.chat_history.append({"role": "assistant", "content": response.text})
                 except Exception as e:
                     error_msg = str(e).lower()
