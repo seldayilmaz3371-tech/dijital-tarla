@@ -295,9 +295,26 @@ elif page == "💬 AI Sohbet":
                 # dışı kalmıştı. Yerelde İÇERİK eşleşmesi yoksa (rag_results
                 # boşsa) ve arama API anahtarı tanımlıysa, güncel bilgi için
                 # web'de arama yapılır.
+                #
+                # DÜZELTME 2: META-SORULAR ("hangi dosyalara erişebiliyorsun",
+                # "kaynaklarını listele" gibi) de içerik bazlı RAG aramasında
+                # sıfır eşleşme verir (haklı olarak — bunlar PDF içeriği değil,
+                # sistemin kendisi hakkında sorular). Bu yüzden böyle bir soru
+                # tespit edilirse web araması ATLANIR; aksi halde kullanıcının
+                # ham sorusu (örn. "dosyaları listele") web'e gönderilip
+                # tamamen ilgisiz IT/teknoloji sonuçları dönebiliyordu.
+                META_SORU_ANAHTAR_KELIMELERI = [
+                    "hangi pdf", "hangi dosya", "hangi kaynak", "dosya listesi",
+                    "dosyaları listele", "kaynakları listele", "kaynaklarını listele",
+                    "erişebiliyorsun", "ulaşabiliyorsun", "erişebildiğin",
+                    "ulaştığın", "indeksli", "indekslenmiş", "bilgi tabanı",
+                    "hangi belgelere", "neleri okuyabiliyorsun",
+                ]
+                is_meta_soru = any(kw in user_query.lower() for kw in META_SORU_ANAHTAR_KELIMELERI)
+
                 web_context = ""
                 web_sources = []
-                if not rag_results and search_client.is_configured():
+                if not rag_results and not is_meta_soru and search_client.is_configured():
                     web_results = search_client.search(user_query)
                     if web_results:
                         web_context = "\n---\n".join(f"{r.title}: {r.snippet}" for r in web_results)
