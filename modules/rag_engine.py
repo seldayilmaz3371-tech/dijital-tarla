@@ -64,17 +64,22 @@ class RagEngine:
         for pdf_path in pdf_files:
             try:
                 reader = PdfReader(str(pdf_path))
-            except Exception:
+                for page_num, page in enumerate(reader.pages, start=1):
+                    try:
+                        text = page.extract_text() or ""
+                        text = re.sub(r"\s+", " ", text).strip()
+                        if not text:
+                            continue
+                        for chunk_text in self._split_text(text):
+                            self.chunks.append(
+                                RagChunk(text=chunk_text, source_file=pdf_path.name, page=page_num)
+                            )
+                    except Exception as page_err:
+                        print(f"Uyarı: {pdf_path.name} dosyası, Sayfa {page_num} okunamadı. Atlanıyor...")
+                        continue
+            except Exception as file_err:
+                print(f"Hata: {pdf_path.name} dosyası işlenirken çökme engellendi. Dosya atlanıyor...")
                 continue
-            for page_num, page in enumerate(reader.pages, start=1):
-                text = page.extract_text() or ""
-                text = re.sub(r"\s+", " ", text).strip()
-                if not text:
-                    continue
-                for chunk_text in self._split_text(text):
-                    self.chunks.append(
-                        RagChunk(text=chunk_text, source_file=pdf_path.name, page=page_num)
-                    )
 
         if self.chunks:
             self.vectorizer = TfidfVectorizer(max_df=0.9)
